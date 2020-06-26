@@ -47,7 +47,7 @@ def main():
 	while rospy.get_time() - time <= localizationTime:
 		vel_msg.angular.z = 5.0
 		vel_publisher.publish(vel_msg)
-		if rospy.get_time() - time >= localizationTime % 10: rospy.log_info("TIME SPENT LOCALIZING: " + str(rospy.get_time() - time) + " SECONDS OUT OF " + str(localizationTime))
+		if rospy.get_time() - time >= localizationTime % 10: rospy.loginfo("TIME SPENT LOCALIZING: " + str(rospy.get_time() - time) + " SECONDS OUT OF " + str(localizationTime))
 	vel_msg.angular.z = 0.0
 	vel_publisher.publish(vel_msg)
 
