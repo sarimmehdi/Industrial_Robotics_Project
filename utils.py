@@ -93,6 +93,39 @@ def getPoints(myMap, initialPos, goalPos):
 		rospy.sleep(0.01)
 		return realPts[::-1]
 
+def createPoint(pt, markerID):
+	marker = Marker()
+	marker.header.frame_id = "/map"
+	marker.type = marker.SPHERE
+	marker.action = marker.ADD
+	marker.ns = "robot"
+	marker.header.stamp = rospy.get_rostime()
+	marker.id = markerID
+
+	# marker scale
+	marker.scale.x = 0.1
+	marker.scale.y = 0.1
+	marker.scale.z = 0.1
+
+	# marker color
+	marker.color.a = 1.0
+	marker.color.r = 0.0
+	marker.color.g = 1.0
+	marker.color.b = 1.0
+
+	# marker orientaiton
+	marker.pose.orientation.x = 0.0
+	marker.pose.orientation.y = 0.0
+	marker.pose.orientation.z = 0.0
+	marker.pose.orientation.w = 1.0
+
+	# marker position
+	marker.pose.position.x = pt[0]
+	marker.pose.position.y = pt[1]
+	marker.pose.position.z = 0.0
+
+	return marker
+
 def createLine(pt1, pt2, markerID):
 	marker = Marker()
 	marker.header.frame_id = "/map"
