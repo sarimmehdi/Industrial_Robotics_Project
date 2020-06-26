@@ -1,145 +1,173 @@
-#!/usr/bin/env python
 import rospy
-import tf
-import copy
-from geometry_msgs.msg import Twist, PoseWithCovarianceStamped, Point
-from sensor_msgs.msg import LaserScan
-from nav_msgs.msg import OccupancyGrid, Odometry
-from visualization_msgs.msg import MarkerArray, Marker
+import random
+
+from probabilistic_road_map import *
+#from astar import *
+from visualization_msgs.msg import Marker
+from geometry_msgs.msg import Point
+from scipy.interpolate import Rbf
+from math import isnan, ceil
 import numpy as np
+import matplotlib.pyplot as plt
 
-from Map import *
-from Robot import *
-from utils import *
-
-def main():
-	rospy.init_node('navigation', anonymous=True)
-	myRobot = Robot()
-	myMap = Map()
-	rospy.Subscriber('/scan', LaserScan, myRobot.laserScannerCallback)
-	rospy.Subscriber('/map', OccupancyGrid, myMap.getMap)
-	rospy.Subscriber("/cmd_vel", Twist, myRobot.getRobotSpeed)
-	rospy.Subscriber("/amcl_pose", PoseWithCovarianceStamped, myRobot.updateRobotPos)
-	vel_publisher = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
-	viz_publisher = rospy.Publisher('/visualization_marker_array', MarkerArray, queue_size=10)		
+def getPoints(myMap, initialPos, goalPos):
+	initialPosXInMap = int((initialPos[0] - myMap.originX) * 1/myMap.resolution)
+	initialPosYInMap = int((initialPos[1] - myMap.originY) * 1/myMap.resolution)
+	initialPosInMap = [initialPosXInMap, initialPosYInMap]
+	goalPosXInMap = int((goalPos[0] - myMap.originX) * 1/myMap.resolution)
+	goalPosYInMap = int((goalPos[1] - myMap.originY) * 1/myMap.resolution)
+	goalPosInMap = [goalPosXInMap, goalPosYInMap]
 	
-	goalFile = open('goals.txt', 'r+')
-	goals = []
-	while True:
-		line = goalFile.readline()
-		if line == '':
-			break
+	#Note: Map x-axis increases from bottom to top and y-axis increases from left to right
+	#Need to align map to coordinates by rotating it 90 degrees clockwise and then flipping it
+	#upside down
+	myGrid = np.flipud(np.rot90(np.array(myMap.grid)))
+	myGridOrg = np.copy(myGrid)
+	myGridOrg[initialPosXInMap,initialPosYInMap] = 150
+	myGridOrg[goalPosXInMap,goalPosYInMap] = 50
+	sx = initialPosXInMap
+	sy = initialPosYInMap
+	gx = goalPosXInMap
+	gy = goalPosYInMap
+	robot_size = 1
+
+	ox = list(map(int, np.where(myGrid == 100.0)[0].tolist()))
+	oy = list(map(int, np.where(myGrid == 100.0)[1].tolist()))
+	if sx in ox and sy in oy:
+		rospy.loginfo("REMOVING ROBOT POSITION FROM OBSTACLE LIST")
+		ox.remove(sx)
+		oy.remove(sy)
+
+	attempts = 0
+	while attempts < 10:
+		rx, ry = PRM_planning(sx, sy, gx, gy, ox, oy, robot_size)
+		candidates = [list(pos) for pos in zip(rx, ry)]
+		if not candidates:
+			attempts += 1
+			rospy.loginfo("COULDN'T FIND ANY PATH AFTER " + str(attempts) + " ATTEMPTS! TRYING AGAIN")
+		else: break
+		rospy.sleep(0.01)
+	if not candidates:
+		rospy.loginfo("COULDN'T FIND ANY PATH!")
+		return []
+	else:
+		#rospy.loginfo("ASTAR COMPLETE!")
+		rospy.loginfo("PRM COMPLETE!")
+		for cand in candidates:
+			myGridOrg[int(cand[0]),int(cand[1])] = 200
+		myGridOrg = np.rot90(np.flipud(myGridOrg), axes=(1,0))
+
+		fig = plt.figure(figsize=(6, 3.2))
+		ax = fig.add_subplot(111)
+		ax.set_title('colorMap')
+		plt.imshow(myGridOrg)
+		ax.set_aspect('equal')
+
+		cax = fig.add_axes([0.12, 0.1, 0.78, 0.8])
+		cax.get_xaxis().set_visible(False)
+		cax.get_yaxis().set_visible(False)
+		cax.patch.set_alpha(0)
+		cax.set_frame_on(False)
+		plt.colorbar(orientation='vertical')
+		plt.show()
+
+		xVals = []
+		yVals = []
+		#convert back to simulation coordinates
+		for candidate in candidates:
+			xVals.append(int(candidate[0]) * myMap.resolution + myMap.originX)
+			yVals.append(int(candidate[1]) * myMap.resolution + myMap.originY)
+		realPts = [list(pos) for pos in zip(xVals, yVals)]
+		return realPts[::-1]
+		z = np.polyfit(np.array(xVals), np.array(yVals), 5)
+		p = np.poly1d(z)
+		if xVals[0] < xVals[-1]:
+			xNewVals = np.arange(xVals[0], xVals[-1], 0.3)
 		else:
-			coords = list(line.split(" "))
-			goals.append(np.array([float(coords[0]), float(coords[1])]))
-	
-	rospy.loginfo("WAITING FOR MAP DATA...")
-	while not myMap.gotMapData:
+			xNewVals = np.arange(xVals[0], xVals[-1], -0.3)
+		np.append(xNewVals, xVals[-1])
+		yNewVals = []
+		for xNewVal in xNewVals:
+			yNewVals.append(p(xNewVal))
+		realPts = [list(pos) for pos in zip(xNewVals, yNewVals)]
 		rospy.sleep(0.01)
-	rospy.loginfo("GOT MAP DATA!")
-	
-	tryAgain = False
-	vel_msg = Twist()
+		return realPts[::-1]
 
-	#localize robot in the beginning
-	time = rospy.get_time()
-	while rospy.get_time() - time <= 45.0:
-		vel_msg.angular.z = 5.0
-		vel_publisher.publish(vel_msg)
-	print("TIME TAKEN TO LOCALIZE: " + str(rospy.get_time() - time))
+def createPoint(pt, markerID):
+	marker = Marker()
+	marker.header.frame_id = "/map"
+	marker.type = marker.SPHERE
+	marker.action = marker.ADD
+	marker.ns = "robot"
+	marker.header.stamp = rospy.get_rostime()
+	marker.id = markerID
 
-	#make one or both of these true if you are trying to observe other robot behaviors
-	#useful if you want to see whether the robot successfully turns towards a goal or not 
-	dontMove = False
-	dontRot = False
-	all_points_reached = False
-	while not rospy.is_shutdown() and not all_points_reached:
-		markerArray = MarkerArray()
-		for goal in goals:
-			success = False
-			while not success:
-				#erase previous markers to draw new ones
-				if markerArray.markers:
-					for marker in markerArray.markers:
-						marker.action = marker.DELETE	
-					viz_publisher.publish(markerArray)
-					markerArray.markers[:] = []		
-				
-				#get all points from goal position to robot's position
-				viaPts = getPoints(myMap, myRobot.curPos, goal)
-				if not viaPts:
-					rospy.loginfo("UNABLE TO FIND A PATH TO FOLLOWING POINT: ")
-					rospy.loginfo(goal)
-					rospy.loginfo("NOW I WILL TRY NEXT POINT...")
-					break
-				myRobot.viaPts = copy.deepcopy(viaPts)
-					
-				#draw points
-				ID = 0
-				for i in range(len(viaPts) - 1):
-					markerArray.markers.append(createLine(viaPts[i], viaPts[i+1], ID))
-					ID += 1
-				viz_publisher.publish(markerArray)
-				rospy.sleep(1)		
+	# marker scale
+	marker.scale.x = 0.1
+	marker.scale.y = 0.1
+	marker.scale.z = 0.1
 
-				#follow points to goal
-				tryAgain = False
-				for pt in viaPts:
-					myRobot.viaPt = pt
-					reverseTimer = 0.0
-					posTimer = rospy.get_time()
-					time = rospy.get_time()
-					reverse = False
-					while np.linalg.norm(myRobot.curPos-myRobot.viaPt) > 0.6:
-						viz_publisher.publish(markerArray)
-						dt = rospy.get_time() - time
-						time = rospy.get_time()
-						myRobot.movToAPoint(vel_msg, 0.2, 0.05, 0.5)
+	# marker color
+	marker.color.a = 1.0
+	marker.color.r = 0.0
+	marker.color.g = 1.0
+	marker.color.b = 1.0
 
-						if myRobot.closestDistToObs <= 0.4 and myRobot.obsDir == 'left':
-							vel_msg.angular.z = 1.0
+	# marker orientaiton
+	marker.pose.orientation.x = 0.0
+	marker.pose.orientation.y = 0.0
+	marker.pose.orientation.z = 0.0
+	marker.pose.orientation.w = 1.0
 
-						if myRobot.closestDistToObs <= 0.4 and myRobot.obsDir == 'right':
-							vel_msg.angular.z = -1.0
+	# marker position
+	marker.pose.position.x = pt[0]
+	marker.pose.position.y = pt[1]
+	marker.pose.position.z = 0.0
 
-						if (rospy.get_time() - posTimer >= 20.0 or \
-							(myRobot.obsDir == 'both' and \
-							myRobot.minAngleToClosestObs in range(61) and \
-							myRobot.minAngleToClosestObs in range(360, 361))) and \
-							not reverse: 
-							reverse = True
-							reverseTimer = rospy.get_time()
-			
-						if reverse and rospy.get_time() - reverseTimer > 5.0:
-							rospy.loginfo("ROBOT SHOULD BE OUT OF STUCK PLACE NOW...")
-							vel_msg.angular.z = 0
-							vel_msg.linear.x = 0
-							reverse = False
-							posTimer = rospy.get_time()
-							rospy.loginfo("TRYING AGAIN")
-							tryAgain = True
-							success = False
-							break
+	return marker
 
-						if reverse:
-							rospy.loginfo("ROBOT IS STUCK SOMEWHERE! REVERSING!")
-							vel_msg.angular.z = 0
-							vel_msg.linear.x = -0.2
+def createLine(pt1, pt2, markerID):
+	marker = Marker()
+	marker.header.frame_id = "/map"
+	marker.type = marker.LINE_STRIP
+	marker.action = marker.ADD
+	marker.id = markerID
 
-						myRobot.checkIfPointBehind(vel_msg, 0.5)
-						
-						#useful when troubleshooting
-						if dontMove: vel_msg.linear.x = 0
-						if dontRot: vel_msg.angular.z = 0
-						vel_publisher.publish(vel_msg)
-						rospy.sleep(0.01)
-					if tryAgain: break
-					if np.linalg.norm(myRobot.curPos-myRobot.viaPt) <= 0.5: success = True
-		rospy.sleep(0.01)
-		all_points_reached = True
+	# marker scale
+	marker.scale.x = 0.03
+	marker.scale.y = 0.03
+	marker.scale.z = 0.03
 
-if __name__ == '__main__':
-	try:
-		main()
-	except rospy.ROSInterruptException:
-		pass
+	# marker color
+	marker.color.a = 1.0
+	marker.color.r = 1.0
+	marker.color.g = 1.0
+	marker.color.b = 0.0
+
+	# marker orientaiton
+	marker.pose.orientation.x = 0.0
+	marker.pose.orientation.y = 0.0
+	marker.pose.orientation.z = 0.0
+	marker.pose.orientation.w = 1.0
+
+	# marker position
+	marker.pose.position.x = 0.0
+	marker.pose.position.y = 0.0
+	marker.pose.position.z = 0.0
+
+	# marker line points
+	marker.points = []
+	# first point
+	first_line_point = Point()
+	first_line_point.x = pt1[0]
+	first_line_point.y = pt1[1]
+	first_line_point.z = 0.0
+	marker.points.append(first_line_point)
+	# second point
+	second_line_point = Point()
+	second_line_point.x = pt2[0]
+	second_line_point.y = pt2[1]
+	second_line_point.z = 0.0
+	marker.points.append(second_line_point)
+
+	return marker
