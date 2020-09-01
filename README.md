@@ -1,5 +1,5 @@
 # Industrial_Robotics_Project
-Mapping and Navigation in the ROS simulation environment
+Mapping and Navigation in the ROS simulation environment. Also did analysis of joint-space trajectories for a PUMA 560 manipulator (requirs Peter Corke's Robotics Toolbox for MATLAB).
 
 # How to execute mapping
 roslaunch turtlebot3_gazebo turtlebot3_house.launch
