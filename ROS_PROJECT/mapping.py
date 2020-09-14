@@ -36,9 +36,12 @@ def main():
 	tryAgain = False
 	vel_msg = Twist()
 	markerID = 0
+	visitedListSize = 60
 	obsMarkerList = []
-
-	while not rospy.is_shutdown():
+	
+	start_time = rospy.get_time()
+	j = 1
+	while not rospy.is_shutdown() and rospy.get_time() - start_time < 600:
 		success = False
 		markerArray = MarkerArray()
 
@@ -49,18 +52,24 @@ def main():
 			viz_publisher.publish(markerArray)
 			markerArray.markers[:] = []
 
+		if rospy.get_time() - start_time >= 30 * j:
+			hours, rem = divmod(rospy.get_time() - start_time, 3600)
+			minutes, seconds = divmod(rem, 60)
+			print('TIME ELAPSED SO FAR:')
+			print("{:0>2}:{:0>2}:{:05.2f}".format(int(hours), int(minutes), seconds))
+			j += 1
+
 		#draw a marker for every point you decide to move to
 		myRobot.getNewPt = True
 		while myRobot.getNewPt:
-			x = 2
-		rospy.loginfo("CURRENT ROBOT POSITION IS:")
-		rospy.loginfo(myRobot.curPos)
-		rospy.loginfo("GOT OBSTACLE POSITION TO FOLLOW:")
-		rospy.loginfo(myRobot.farthestObsAround)
-		obsMarker = createPoint(myRobot.farthestObsAround, markerID)
-		obsMarkerList.append(obsMarker)
-		pt_publisher.publish(obsMarker)
-		markerID += 1		
+			#rospy.loginfo("CURRENT ROBOT POSITION IS:")
+			#rospy.loginfo(myRobot.curPos)
+			#rospy.loginfo("GOT OBSTACLE POSITION TO FOLLOW:")
+			#rospy.loginfo(myRobot.farthestObsAround)
+			obsMarker = createPoint(myRobot.farthestObsAround, markerID)
+			obsMarkerList.append(obsMarker)
+			pt_publisher.publish(obsMarker)
+			markerID += 1		
 		
 		#get intermediate points from robot's current position till goal position
 		myRobot.viaPts.append([myRobot.curPos[0], myRobot.curPos[1]])
@@ -85,8 +94,10 @@ def main():
 		rospy.loginfo("ARRIVED AT POSITION, NOW GOING TO NEW ONE")
 		myRobot.visitedPts.append(myRobot.viaPts[-1])
 		myRobot.viaPts[:] = []
-		if len(myRobot.visitedPts) >= 60:
-			rospy.loginfo("MORE THAN 60 POINTS VISITED!")
+		if len(myRobot.visitedPts) >= visitedListSize or myRobot.no_valid_pt:
+			myRobot.no_valid_pt = False
+			if len(myRobot.visitedPts) >= visitedListSize:
+				rospy.loginfo("MORE THAN " + str(visitedListSize) + " POINTS VISITED!")
 			myRobot.visitedPts[:] = []
 			for obsMark in obsMarkerList:
 				obsMark.action = obsMark.DELETE
@@ -94,35 +105,9 @@ def main():
 			markerID = 0
 			obsMarkerList[:] = []
 
+
 if __name__ == '__main__':
 	try:
 		main()
 	except rospy.ROSInterruptException:
 		pass
-
-			
-			
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
