@@ -24,6 +24,7 @@ class Robot:
 		self.robotFacingGoal = False
 		self.getNewPt = False
 		self.randomNess = 0.0
+		self.no_valid_pt = False
 
 	def getRobotSpeed(self, twistMsg):
 		self.curSpeed = twistMsg.linear.x
@@ -65,6 +66,9 @@ class Robot:
 		quaternion = (thePose.x, thePose.y, thePose.z, thePose.w)
 		rpy = tf.transformations.euler_from_quaternion(quaternion)
 		self.curYaw = degrees(rpy[2])
+		if not self.gotRobotPos:
+			self.farthestObsAround = self.curPos
+
 		self.gotRobotPos = True
 
 	def inRangeOfPrevVisitedPts(self, candidate):
@@ -129,11 +133,11 @@ class Robot:
 						minVal = laser_range
 						self.farthestObsAround[0] = copy.deepcopy(farthestObsCoords[0])
 						self.farthestObsAround[1] = copy.deepcopy(farthestObsCoords[1])
-			if np.array_equal(np.array([9999, 9999]), self.farthestObsAround) and self.visitedPts:
+			if np.array_equal(np.array([9999.0, 9999.0]), self.farthestObsAround) and self.visitedPts:
 				rospy.loginfo("UNABLE TO FIND VALID CLOSEST POINT, NOW LOOKING FOR VALID FARTHEST POINT")
 				maxVal = 0
 				self.farthestObsAround = np.array([9999.0, 9999.0])
-				for i in range(270, 360):
+				for i in range(360):
 					laser_range = laserScanner.ranges[i]
 					if laser_range >= maxVal and (min_range <= laser_range <= max_range) and self.getNewPt:
 						farthestObsCoords = copy.deepcopy(self.getCoordsInRefFrame(np.array([laser_range*cos(radians(i)), laser_range*sin(radians(i))])))
@@ -141,17 +145,10 @@ class Robot:
 							maxVal = laser_range
 							self.farthestObsAround[0] = copy.deepcopy(farthestObsCoords[0])
 							self.farthestObsAround[1] = copy.deepcopy(farthestObsCoords[1])
-				for i in range(90):
-					laser_range = laserScanner.ranges[i]
-					if laser_range >= maxVal and (min_range <= laser_range <= max_range) and self.getNewPt:
-						farthestObsCoords = copy.deepcopy(self.getCoordsInRefFrame(np.array([laser_range*cos(radians(i)), laser_range*sin(radians(i))])))
-						if not self.inRangeOfPrevVisitedPts(farthestObsCoords):
-							maxVal = laser_range
-							self.farthestObsAround[0] = copy.deepcopy(farthestObsCoords[0])
-							self.farthestObsAround[1] = copy.deepcopy(farthestObsCoords[1])
-				if np.array_equal(np.array([9999, 9999]), self.farthestObsAround) and self.visitedPts:
-					rospy.loginfo("UNABLE TO FIND ANY VALID POINT, TIME TO RANDOMLY CHOOSE A POINT FROM THE PREVIOUS 5 VISITED POINTS")
-					self.farthestObsAround = np.array(random.choice(self.visitedPts[-5:]))
+				if np.array_equal(np.array([9999.0, 9999.0]), self.farthestObsAround) and self.visitedPts:
+					self.farthestObsAround = self.curPos
+					self.no_valid_pt = True
+					rospy.loginfo('FOUND NO VALID POINT! EMPTYING VISITED POINT LIST')
 		self.getNewPt = False
 
 	def checkIfPointBehind(self, twistMsg, Kh):
