@@ -1,6 +1,8 @@
 # Industrial_Robotics_Project
 Mapping and Navigation in the ROS simulation environment. Also did analysis of joint-space trajectories for a PUMA 560 manipulator (requirs Peter Corke's Robotics Toolbox for MATLAB).
 
+Detailed explanation for mobile robotics project: https://medium.com/@sarim.mehdi.550/mapping-path-following-for-a-two-wheeled-robot-b8bd55214405
+
 # How to execute mapping
 roslaunch turtlebot3_gazebo turtlebot3_house.launch
 
